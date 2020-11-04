@@ -1,0 +1,202 @@
+---
+title: "Volatilidade/Value at Risk"
+author: "Helena Boin Gaidys, Lucas Marra e Vinicius Maia"
+date: "11/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+#Bibliotecas
+```{r}
+library(tidyverse)
+library(fUnitRoots)
+library(forecast)
+library(xts)
+library(fGarch)
+library(rugarch)
+library(BatchGetSymbols)
+library(FinTS)
+```
+
+#Base de dados
+```{r}
+paypal <- c("PYPL")
+start_date <- c('2017-01-01')
+
+data_paypal = BatchGetSymbols(paypal,
+                       first.date = start_date,
+                       last.date = '2020-10-01',
+                       bench.ticker = "^GSPC", 
+                       type.return = "log",
+                       freq.data = "daily",
+                       do.complete.data = TRUE,
+                       do.fill.missing.prices = TRUE)
+
+df.paypal <- data_paypal$df.tickers %>%
+  dplyr::filter(volume!=0)
+
+magalu <- c("MGLU3.SA")
+
+data_magalu = BatchGetSymbols(magalu,
+                       first.date = start_date,
+                       last.date = '2020-10-01',
+                       bench.ticker = "^GSPC", 
+                       type.return = "log",
+                       freq.data = "daily",
+                       do.complete.data = TRUE,
+                       do.fill.missing.prices = TRUE)
+
+df.magalu <- data_magalu$df.tickers %>%
+  dplyr::filter(volume!=0)
+```
+
+#Análise Gráfica do Preço e Log-Retornos
+
+ANÁLISE DOS GRÁFICOS
+
+O gráfico de preços é claramente não estacionária, pois possui uma tendência de crescimento da ação. Houve uma queda em 2020 por causa da crise do COVID, seguido de uma crescente. Essa crescente se deve, muito provavelmente, a um aumento de transações online durante a pandemia. 
+
+O gráfico de log-retorno se concentra em uma média em torno de zero e contém clusters de volatilidade.
+```{r}
+ggplot(df.paypal, aes(x=ref.date, y=price.close, group=ticker)) +
+  geom_line(aes(color=ticker))+
+  geom_point(aes(color=ticker))+
+  theme(legend.position="top")+
+  xlab('Data')+ylab('$') +
+  theme_minimal() +
+  labs(title = "Preço diário de fechamento - Paypal")
+
+ggplot(df.paypal, aes(x=ref.date, y=ret.closing.prices, group=ticker)) +
+  geom_line(aes(color=ticker))+
+  geom_point(aes(color=ticker))+
+  theme(legend.position="top")+
+  xlab('Data')+ylab('$') +
+  theme_minimal() +
+  labs(title = "Log-Retorno diário - Paypal")
+```
+
+ANÁLISE DOS GRÁFICOS
+
+```{r}
+ggplot(df.magalu, aes(x=ref.date, y=price.close, group=ticker)) +
+  geom_line(aes(color=ticker))+
+  geom_point(aes(color=ticker))+
+  theme(legend.position="top")+
+  xlab('Data')+ylab('$') +
+  theme_minimal() +
+  labs(title = "Preço diário de fechamento - Magazine Luiza")
+
+ggplot(df.magalu, aes(x=ref.date, y=ret.closing.prices, group=ticker)) +
+  geom_line(aes(color=ticker))+
+  geom_point(aes(color=ticker))+
+  theme(legend.position="top")+
+  xlab('Data')+ylab('$') +
+  theme_minimal() +
+  labs(title = "Log-Retorno diário - Magazine Luiza")
+```
+
+# Teste de Raíz Unitária e Normalidade
+
+## Paypal
+```{r}
+ret_paypal <- df.paypal$ret.closing.prices[-1]
+ret2_paypal <- df.paypal$ret.closing.prices[-1]^2
+```
+
+Rejeita-se a hipótese de independência, então retorno não é um ruído branco para todos os lags calculados.
+
+Por isso, precisará ajustar um ARMA.
+```{r}
+Acf(ret_paypal,60)
+
+n <- length(ret_paypal)
+for(i in 1:floor(log(n)))
+  print(Box.test(ret_paypal, lag = i, type = "Ljung-Box"))
+```
+
+Rejeita a hipótese de independência, então os preços são não estacionários.
+```{r}
+Acf(df.paypal$price.close,60)
+Box.test(df.paypal$price.close, type = "Ljung-Box")
+```
+
+Retorno ao quadrado é não estacionário, entáo há indicíos de efeito ARCH. 
+```{r}
+Acf(ret2_paypal,60)
+#olhando para a PACF, o efeito será um ARCH(5)
+Acf(ret2_paypal,60,type="partial")
+Box.test(ret2_paypal, type = "Ljung-Box")
+
+ArchTest(ret_paypal)
+```
+
+Pelos gráficos e pelo teste, pode-se ver que os retornos não são normais.
+```{r}
+# QQplot
+par(mfrow=c(1,2))
+h <- hist(ret_paypal, breaks=20, col="red", xlab="", 
+          main="Histogram") 
+xfit <- seq(min(ret_paypal),max(ret_paypal),length=40) 
+yfit <- dnorm(xfit,mean=mean(ret_paypal),sd=sd(ret_paypal)) 
+yfit <- yfit*diff(h$mids[1:2])*length(ret_paypal) 
+lines(xfit, yfit, col="blue", lwd=2)
+
+#caudas pesadas > não é normal
+qqnorm(ret_paypal, pch = 1, frame = FALSE)
+qqline(ret_paypal, col = "steelblue", lwd = 2)
+
+shapiro.test(ret_paypal)
+```
+
+## Magazine Luiza
+```{r}
+ret_magalu <- df.magalu$ret.closing.prices[-1]
+ret2_magalu <- df.magalu$ret.closing.prices[-1]^2
+```
+
+Rejeita-se a hipótese de independência, então retorno não é um ruído branco para todos os lags calculados.
+
+Por isso, precisará ajustar um ARMA.
+```{r}
+Acf(ret_magalu,60)
+
+n <- length(ret_magalu)
+for(i in 1:floor(log(n)))
+  print(Box.test(ret_magalu, lag = i, type = "Ljung-Box"))
+```
+
+Rejeita a hipótese de independência, então os preços são não estacionários.
+```{r}
+Acf(df.magalu$price.close,60)
+Box.test(df.magalu$price.close, type = "Ljung-Box")
+```
+
+Retorno ao quadrado é não estacionário, entáo há indicíos de efeito ARCH. 
+```{r}
+Acf(ret2_magalu,60)
+#olhando para a PACF, o efeito será um ARCH(5)
+Acf(ret2_magalu,60,type="partial")
+Box.test(ret2_magalu, type = "Ljung-Box")
+
+ArchTest(ret_magalu)
+```
+
+Pelos gráficos e pelo teste, pode-se ver que os retornos não são normais.
+```{r}
+# QQplot
+par(mfrow=c(1,2))
+h <- hist(ret_magalu, breaks=20, col="red", xlab="", 
+          main="Histogram") 
+xfit <- seq(min(ret_magalu),max(ret_magalu),length=40) 
+yfit <- dnorm(xfit,mean=mean(ret_magalu),sd=sd(ret_magalu)) 
+yfit <- yfit*diff(h$mids[1:2])*length(ret_magalu) 
+lines(xfit, yfit, col="blue", lwd=2)
+
+qqnorm(ret_magalu, pch = 1, frame = FALSE)
+qqline(ret_magalu, col = "steelblue", lwd = 2)
+
+shapiro.test(ret_magalu)
+```
