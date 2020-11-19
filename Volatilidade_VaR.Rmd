@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
-#Bibliotecas
+## Bibliotecas
 ```{r}
 library(tidyverse)
 library(fUnitRoots)
@@ -19,9 +19,11 @@ library(fGarch)
 library(rugarch)
 library(BatchGetSymbols)
 library(FinTS)
+library(tseries)
+library(gridExtra)
 ```
 
-#Base de dados
+## Base de dados
 ```{r}
 paypal <- c("PYPL")
 start_date <- c('2017-01-01')
@@ -53,13 +55,11 @@ df.magalu <- data_magalu$df.tickers %>%
   dplyr::filter(volume!=0)
 ```
 
-#Análise Gráfica do Preço e Log-Retornos
+## Análise Gráfica do Preço e Log-Retornos
 
-ANÁLISE DOS GRÁFICOS
+O gráfico de preços mostra que a série é claramente não estacionária, pois possui uma tendência de crescimento da ação. Houve uma queda em 2020 por causa da crise do COVID, seguido de uma crescente. Essa crescente se deve, muito provavelmente, a um aumento de transações online durante a pandemia. 
 
-O gráfico de preços é claramente não estacionária, pois possui uma tendência de crescimento da ação. Houve uma queda em 2020 por causa da crise do COVID, seguido de uma crescente. Essa crescente se deve, muito provavelmente, a um aumento de transações online durante a pandemia. 
-
-O gráfico de log-retorno se concentra em uma média em torno de zero e contém clusters de volatilidade.
+O gráfico de log-retorno se concentra em uma média em torno de zero e contém clusters de volatilidade. Ou seja, é estacionário, mas não é um ruído branco.
 ```{r}
 ggplot(df.paypal, aes(x=ref.date, y=price.close, group=ticker)) +
   geom_line(aes(color=ticker))+
@@ -67,7 +67,8 @@ ggplot(df.paypal, aes(x=ref.date, y=price.close, group=ticker)) +
   theme(legend.position="top")+
   xlab('Data')+ylab('$') +
   theme_minimal() +
-  labs(title = "Preço diário de fechamento - Paypal")
+  labs(title = "Preço diário de fechamento - Paypal") +
+  theme(legend.position = "none")
 
 ggplot(df.paypal, aes(x=ref.date, y=ret.closing.prices, group=ticker)) +
   geom_line(aes(color=ticker))+
@@ -78,7 +79,9 @@ ggplot(df.paypal, aes(x=ref.date, y=ret.closing.prices, group=ticker)) +
   labs(title = "Log-Retorno diário - Paypal")
 ```
 
-ANÁLISE DOS GRÁFICOS
+O gráfico de preços mostra que no caso de Magazine Luiza também mostra que a série é não estacionária, pois possui uma tendência de crescimento da ação. A queda de 2020 foi devido à COVID, mas depois houve um aumento exponencial do preço da ação, já que as pessoas tiveram que comprar muito mais de forma online durante a pandemia.
+
+O gráfico de log-retorno se concentra em uma média em torno de zero e contém clusters de volatilidade. Ou seja, é estacionário, mas não é um ruído branco.
 
 ```{r}
 ggplot(df.magalu, aes(x=ref.date, y=price.close, group=ticker)) +
@@ -87,7 +90,8 @@ ggplot(df.magalu, aes(x=ref.date, y=price.close, group=ticker)) +
   theme(legend.position="top")+
   xlab('Data')+ylab('$') +
   theme_minimal() +
-  labs(title = "Preço diário de fechamento - Magazine Luiza")
+  labs(title = "Preço diário de fechamento - Magazine Luiza") +
+  theme(legend.position = "none")
 
 ggplot(df.magalu, aes(x=ref.date, y=ret.closing.prices, group=ticker)) +
   geom_line(aes(color=ticker))+
@@ -98,42 +102,70 @@ ggplot(df.magalu, aes(x=ref.date, y=ret.closing.prices, group=ticker)) +
   labs(title = "Log-Retorno diário - Magazine Luiza")
 ```
 
-# Teste de Raíz Unitária e Normalidade
+## Teste de Raíz Unitária, Normalidade e Testes para Efeito ARCH
 
-## Paypal
+### Paypal
 ```{r}
 ret_paypal <- df.paypal$ret.closing.prices[-1]
 ret2_paypal <- df.paypal$ret.closing.prices[-1]^2
 ```
 
-Rejeita-se a hipótese de independência, então retorno não é um ruído branco para todos os lags calculados.
+#### Preços
+
+Rejeita-se a hipótese nula, então os preços são não estacionários.
+
+```{r}
+par(mfrow=c(1,2))
+acf(df.paypal$price.close)
+acf(df.paypal$price.close, main = "",type = "partial")
+
+adf.test(df.paypal$price.close)
+```
+
+#### Retorno
+
+Pelo teste de independência (Box.test), pode-se ver que os retornos não são independentes para nenhum dos lags calculados, mas são estacionários (adf.test), o que é um fato estilizado em Finanças.
 
 Por isso, precisará ajustar um ARMA.
-```{r}
-Acf(ret_paypal,60)
 
+Será um ARMA ao invés de um AR ou MA porque a PAC e PACF tem autorrelações diferentes de zero.
+
+```{r}
+par(mfrow=c(1,2))
+acf(ret_paypal, main = "")
+acf(ret_paypal, main = "",type = "partial")
+
+adf.test(ret_paypal)
+
+# Testing for returns autocorrelation (decide if we model mean)
+# if YES, we should adjust ARMA model and get the residuals
 n <- length(ret_paypal)
 for(i in 1:floor(log(n)))
   print(Box.test(ret_paypal, lag = i, type = "Ljung-Box"))
 ```
 
-Rejeita a hipótese de independência, então os preços são não estacionários.
-```{r}
-Acf(df.paypal$price.close,60)
-Box.test(df.paypal$price.close, type = "Ljung-Box")
-```
+#### Retorno ao quadrado
 
-Retorno ao quadrado é não estacionário, entáo há indicíos de efeito ARCH. 
+Retorno ao quadrado é não estacionário, entáo há indicíos de efeito ARCH.
+
+Pelo teste ArchTest dá para ver que há indícios de efeito ARCH.
+
 ```{r}
-Acf(ret2_paypal,60)
-#olhando para a PACF, o efeito será um ARCH(5)
-Acf(ret2_paypal,60,type="partial")
-Box.test(ret2_paypal, type = "Ljung-Box")
+par(mfrow=c(1,2))
+acf(ret2_paypal,60)
+acf(ret2_paypal,60,type="partial")
+
+resid2 <- ret2_paypal
+for(i in 1:floor(log(n))) 
+  print(Box.test(resid2, lag = i, type = "Ljung-Box"))
 
 ArchTest(ret_paypal)
 ```
 
+#### Teste de normalidade
+
 Pelos gráficos e pelo teste, pode-se ver que os retornos não são normais.
+
 ```{r}
 # QQplot
 par(mfrow=c(1,2))
@@ -151,40 +183,67 @@ qqline(ret_paypal, col = "steelblue", lwd = 2)
 shapiro.test(ret_paypal)
 ```
 
-## Magazine Luiza
+### Magazine Luiza
+
 ```{r}
 ret_magalu <- df.magalu$ret.closing.prices[-1]
 ret2_magalu <- df.magalu$ret.closing.prices[-1]^2
 ```
 
-Rejeita-se a hipótese de independência, então retorno não é um ruído branco para todos os lags calculados.
+#### Preço
+
+Rejeita-se a hipótese nula, então os preços são não estacionários.
+
+```{r}
+par(mfrow=c(1,2))
+acf(df.magalu$price.close,60)
+acf(df.magalu$price.close, main = "",type = "partial")
+
+adf.test(df.magalu$price.close)
+```
+
+#### Retorno
+
+Pelo teste de independência (Box.test), pode-se ver que os retornos não são independentes para nenhum dos lags calculados, mas são estacionários (adf.test), o que é um fato estilizado em Finanças.
 
 Por isso, precisará ajustar um ARMA.
+
+Será um ARMA ao invés de um AR ou MA porque a PAC e PACF tem autorrelações diferentes de zero.
+
 ```{r}
-Acf(ret_magalu,60)
+par(mfrow=c(1,2))
+acf(ret_magalu, main = "")
+acf(ret_magalu, main = "",type = "partial")
+
+adf.test(ret_magalu)
 
 n <- length(ret_magalu)
 for(i in 1:floor(log(n)))
   print(Box.test(ret_magalu, lag = i, type = "Ljung-Box"))
 ```
 
-Rejeita a hipótese de independência, então os preços são não estacionários.
-```{r}
-Acf(df.magalu$price.close,60)
-Box.test(df.magalu$price.close, type = "Ljung-Box")
-```
+#### Retorno ao quadrado
 
-Retorno ao quadrado é não estacionário, entáo há indicíos de efeito ARCH. 
+Retorno ao quadrado é não estacionário, entáo há indicíos de efeito ARCH.
+
+Pelo teste ArchTest dá para ver que há indícios de efeito ARCH.
+
 ```{r}
-Acf(ret2_magalu,60)
-#olhando para a PACF, o efeito será um ARCH(5)
-Acf(ret2_magalu,60,type="partial")
-Box.test(ret2_magalu, type = "Ljung-Box")
+par(mfrow=c(1,2))
+acf(ret2_magalu,60)
+acf(ret2_magalu,60,type="partial")
+
+resid2 <- ret2_magalu
+for(i in 1:floor(log(n))) 
+  print(Box.test(resid2, lag = i, type = "Ljung-Box"))
 
 ArchTest(ret_magalu)
 ```
 
+#### Teste de normalidade
+
 Pelos gráficos e pelo teste, pode-se ver que os retornos não são normais.
+
 ```{r}
 # QQplot
 par(mfrow=c(1,2))
@@ -200,3 +259,372 @@ qqline(ret_magalu, col = "steelblue", lwd = 2)
 
 shapiro.test(ret_magalu)
 ```
+
+## Modelo de Volatilidade
+
+### Paypal
+
+#### Ajuste ARMA
+
+Após a primeira etapa de identificação da metodologia Box Jeninks, viu-se que precisará ajustar um ARMA.
+
+Etapa 2 (estimação): ARMA(3,2) é o melhor modelo seguindo o AIC como critério de informação.
+
+Etapa 3 (diagnóstico): Os resíduos são um ruído branco, por isso o modelo está bem ajustado.
+
+```{r}
+auto.arima(ret_paypal, d=0, trace = TRUE, ic="aic",stepwise = FALSE) # ARMA(3,0,2) melhor modelo pelo criterio aic
+res_paypal <- Arima(ret_paypal,order=c(3,0,2))$res
+Acf(res_paypal,main="",xlab="")
+plot(res_paypal)
+Box.test(res_paypal, lag = 14 , fitdf = 2 , type = 'Ljung-Box')
+```
+
+#### Efeitos ARCH
+```{r}
+Box.test(ret2_paypal, type = "Ljung-Box") # Indica efeito ARCH
+ArchTest(ret2_paypal, lags = 12) # Indica efeito ARCH
+```
+
+#### Ajustando GARCH
+
+Teste para diversos valores para GARCH
+
+```{r}
+fit = list()
+specs = list()
+AICs = matrix(NA, 64, 5)
+colnames(AICs) = c('Arch-Order', 'Garch-Order','Model', 'Distr.', 'BIC')
+rownames(AICs) = paste("Modelo", 1:64, sep = " ")
+dist = c('norm', 'std')
+model = c('sGARCH', 'eGARCH')
+
+k = 1
+
+for (i in 1:4){
+  for (j in 1:4){
+    for (l in 1:length(dist)){
+      for (m in 1:length(model)){
+        
+        specs[[k]] = ugarchspec(mean.model = list(armaOrder = c(3,2)),
+                                variance.model = list(model=model[m], garchOrder=c(i,j)),
+                                distribution.model = dist[l])
+        
+        fit[[k]] = ugarchfit(specs[[k]], data = ret_paypal)
+        
+        AICs[k,] = c(i,j, model[m], dist[l],  abs(round(infocriteria(fit[[k]])[1],3)))
+        
+        k = k + 1
+        
+      }
+    }
+  }
+}
+
+# Qual o modelo que maximiza o valor ABSOLUTO do critério de informação AIC?
+
+best <- which(AICs[,5] == max(AICs[,5]), arr.ind = TRUE)
+
+AICs[best,]
+
+m_final_paypal <- ugarchspec(variance.model=list(model="eGARCH", garchOrder=c(3,4)),
+                      mean.model=list(armaOrder=c(3,2), include.mean=TRUE),
+                      distribution.model="std")
+m_final_paypal_fit <- ugarchfit(m_final_paypal,data=ret_paypal)
+
+ts.plot(m_final_paypal_fit@fit$sigma)
+```
+
+O modelo melhor ajustado seria o ARMA(3,2)+eGARCH(3,4) com distribuição t-student.
+
+A seguir, ACF e PACF do resíduo e resíduo ao quadrado, assim como o plot do resíduo.
+
+```{r}
+resi <- residuals(m_final_paypal_fit,standardize=T)
+ts.plot(resi)
+par(mfrow=c(1,2))
+acf(resi)
+pacf(resi)
+acf(resi^2)
+pacf(resi^2)
+```
+
+Resíduos sem autocorrelação de acordo com os gráficos ACF e PACF, indicando um modelo bem ajustado. Os gráficos ACF e PACF do quadrado dos resíduos também não indicam autocorrelação.
+
+### Magazine Luiza
+
+#### Ajuste ARMA
+
+Após a primeira etapa de identificação da metodologia Box Jeninks, viu-se que precisará ajustar um ARMA.
+
+Etapa 2 (estimação): ARMA(4,1) é o melhor modelo seguindo o AIC como critério de informação.
+
+Etapa 3 (diagnóstico): Os resíduos são um ruído branco, por isso o modelo está bem ajustado.
+
+```{r}
+auto.arima(ret_magalu, d=0, trace = TRUE, ic="aic",stepwise = FALSE) # ARMA(4,0,1) melhor modelo pelo criterio aic
+res_magalu <- Arima(ret_magalu,order=c(4,0,1))$res
+Acf(res_magalu,main="",xlab="")
+plot(res_magalu)
+Box.test(res_magalu, lag = 14 , fitdf = 2 , type = 'Ljung-Box')
+```
+
+#### Efeitos ARCH
+
+```{r}
+Box.test(ret2_magalu, type = "Ljung-Box") # Indica efeito ARCH
+ArchTest(ret2_magalu, lags = 12) # Indica efeito ARCH
+```
+
+#### Ajustando GARCH
+
+Teste para diversos valores para GARCH
+
+```{r}
+fit = list()
+specs = list()
+AICs = matrix(NA, 64, 5)
+colnames(AICs) = c('Arch-Order', 'Garch-Order','Model', 'Distr.', 'BIC')
+rownames(AICs) = paste("Modelo", 1:64, sep = " ")
+dist = c('norm', 'std')
+model = c('sGARCH', 'eGARCH')
+
+k = 1
+
+for (i in 1:4){
+  for (j in 1:4){
+    for (l in 1:length(dist)){
+      for (m in 1:length(model)){
+        
+        specs[[k]] = ugarchspec(mean.model = list(armaOrder = c(4,1)),
+                                variance.model = list(model=model[m], garchOrder=c(i,j)),
+                                distribution.model = dist[l])
+        
+        fit[[k]] = ugarchfit(specs[[k]], data = ret_magalu)
+        
+        AICs[k,] = c(i,j, model[m], dist[l],  abs(round(infocriteria(fit[[k]])[1],3)))
+        
+        k = k + 1
+        
+      }
+    }
+  }
+}
+
+# Qual o modelo que maximiza o valor ABSOLUTO do critério de informação AIC?
+
+best <- which(AICs[,5] == max(AICs[,5]), arr.ind = TRUE)
+
+AICs[best,]
+
+m_final_magalu <- ugarchspec(variance.model=list(model="sGARCH", garchOrder=c(4,1)),
+                      mean.model=list(armaOrder=c(1,1), include.mean=TRUE),
+                      distribution.model="std")
+m_final_magalu_fit <- ugarchfit(m_final_magalu,data=ret_magalu)
+
+ts.plot(m_final_magalu_fit@fit$sigma)
+```
+
+O modelo melhor ajustado seria o ARMA(4,1)+GARCH(1,1) com distribuição t-student.
+
+A seguir, ACF e PACF do resíduo e resíduo ao quadrado, assim como o plot do resíduo.
+
+```{r}
+resi <- residuals(m_final_magalu_fit,standardize=T)
+ts.plot(resi)
+
+par(mfrow=c(1,2))
+acf(resi)
+pacf(resi)
+
+par(mfrow=c(1,2))
+acf(resi^2)
+pacf(resi^2)
+```
+
+Resíduos sem autocorrelação de acordo com os gráficos ACF e PACF, indicando um modelo bem ajustado. Os gráficos ACF e PACF do quadrado dos resíduos também não indicam autocorrelação.
+
+## Value at Risk
+
+Definição: O VaR é uma medida da variação potencial máxima do valor de um ativo (ou carteira de ativos) sobre um período pré-fixado, com dada probabilidade. Ou seja, quanto se pode perder, com probabilidade , sobre um horizonte fixado.
+
+### Abordagem RiskMetrics
+
+Assume média zero e distribuição normal para a série (sem ARMA), usamos iGARCH.
+
+```{r, message=FALSE, warning=FALSE}
+
+paypal_close = df.paypal$price.close
+magalu_close = df.magalu$price.close
+
+paypal_close <- diff(log(paypal_close), lag=1)[-1]
+magalu_close <- diff(log(magalu_close), lag=1)[-1] 
+
+model.spec = ugarchspec(variance.model = list(model = 'iGARCH', garchOrder = c(1 , 1)),
+                        mean.model = list(armaOrder = c(0, 0),
+                                          include.mean=F) )
+
+
+fit_paypal = ugarchfit(spec = model.spec , data = paypal_close)
+fit_paypal@fit$matcoef
+
+fit_magalu = ugarchfit(spec = model.spec , data = magalu_close)
+fit_magalu@fit$matcoef
+
+
+acf(residuals(fit_paypal, standardize = T)^2, main='Paypal')
+acf(residuals(fit_magalu, standardize = T)^2, main='Magalu')
+```
+
+Estimamos os coeficientes alpha e beta e verificamos que os resíduos ao quadrado não são auto correlacionados para as duas ações.
+
+#### VaR para o dia seguinte de cada ação
+
+Qual sera a perda máxima em caso de um evento de extremo com probabilidade de 5% de chance de ocorrer, considerando uma aplicação de 1 milhão.
+
+```{r, message=FALSE, warning=FALSE}
+#qnorm(.05) -> ~1,65, unicaudal, considerando distribuição normal com média 0
+
+forecast_paypal = ugarchforecast(fit_paypal,n.ahead=1,data=paypal_close)
+VaR_paypal = forecast_paypal@forecast$sigmaFor*qnorm(0.05)*1000000
+VaR_paypal
+
+
+forecast_magalu = ugarchforecast(fit_magalu,n.ahead=1,data=magalu_close)
+VaR_magalu = forecast_magalu@forecast$sigmaFor*qnorm(0.05)*1000000
+VaR_magalu
+```
+
+#### Backtest para estimação do VaR ao longo do tempo.
+
+A curva mais escura representa a correção do VaR de acordo com o a evolução do retorno.
+
+```{r, message=FALSE, warning=FALSE}
+# Backtest com estimação do VaR ao longo do tempo
+
+
+backtest_paypal <- ugarchroll(model.spec, data = paypal_close, n.start=5,
+                            refit.every = 22, refit.window = "expanding",
+                            VaR.alpha = .05)
+
+
+backtest_magalu <- ugarchroll(model.spec, data = magalu_close, n.start=5,
+                            refit.every = 22, refit.window = "expanding",
+                            VaR.alpha = .05)
+
+
+xaxis = index(paypal_close)[1:length(paypal_close)]
+
+xaxis = c(xaxis[1], xaxis[500], xaxis[1000], xaxis[1500])
+
+
+# VaR Plot
+
+par(mfrow=c(1,1))
+
+plot(as.vector(paypal_close[1:length(paypal_close)]), type = "l", pch = 16, cex = 0.8,  col = gray(0.2, 0.5),
+     ylab = "Returns", main = "95% VaR Forecasting", xaxt = "n")
+axis(1, at=c(1, 500, 1000, 1500), labels=xaxis)
+lines(backtest_paypal@forecast$VaR[,1], col = 1)
+legend('topright', c("VaR - IGARCH - Paypal") , 
+       lty=1, col=1, lwd=2, bty='n', cex=.75)
+
+
+plot(as.vector(magalu_close[1:length(magalu_close)]), type = "l", pch = 16, cex = 0.8,  col = gray(0.2, 0.5),
+     ylab = "Returns", main = "95% VaR Forecasting", xaxt = "n")
+axis(1, at=c(1, 500, 1000, 1500), labels=xaxis)
+lines(backtest_magalu@forecast$VaR[,1], col = 1)
+legend('topright', c("VaR - IGARCH - Magalu") , 
+       lty=1, col=1, lwd=2,bty='n', cex=.75)
+```
+
+#### VaR da "Carteira"
+```{r, message=FALSE, warning=FALSE}
+# Correlação entre as ações
+
+# Erro para fazer a correlação porque número de observações era diferente entre as duas séries
+# Inner join utilizando "ref.date" como chave para selecionar mesmos dias
+join <- inner_join(df.paypal,df.magalu,by = "ref.date")
+
+# Selecionar apenas coluna de preço de fechamento
+paypal_cor <- join %>% select(price.close.x)
+magalu_cor <- join %>% select(price.close.y)
+
+cor <- cor(paypal_cor, magalu_cor)
+
+VaR_carteira = sqrt(VaR_paypal^2 + VaR_magalu^2 + 2*cor(paypal_cor,magalu_cor)*abs(VaR_magalu)*abs(VaR_paypal))
+
+cor
+VaR_carteira
+```
+
+As duas ações apresentam uma correlação muito forte de 0.94, resultando em uma carteira com VaR elevado, sendo a perda máxima próxima da soma do VaR das duas ações.
+
+A perda máxima será de R$ 82684.65 no dia 02/10/2020 (fim da série no dia 1/10/2020).
+
+### Abordagem Econométrica
+
+Usou-se os modelos encontrados anteriormente.
+
+```{r, message=FALSE, warning=FALSE}
+spec_paypal = ugarchspec(variance.model=list(model="eGARCH", garchOrder=c(3,4)),
+                      mean.model=list(armaOrder=c(3,2), include.mean=TRUE),
+                      distribution.model="std")
+
+
+spec_magalu = ugarchspec(variance.model=list(model="sGARCH", garchOrder=c(4,1)),
+                      mean.model=list(armaOrder=c(1,1), include.mean=TRUE),
+                      distribution.model="std")
+
+
+fit_paypal = ugarchfit(spec = spec_paypal , data = paypal_close)
+fit_paypal@fit$matcoef
+
+fit_magalu = ugarchfit(spec = spec_magalu , data = magalu_close)
+fit_magalu@fit$matcoef
+
+```
+
+
+#### VaR para o dia seguinte de cada ação
+
+Qual será a perda máxima em caso de um evento de extremo com probabilidade de 5% de chance de ocorrer, considerando uma aplicação de 1 milhão.
+
+```{r, message=FALSE, warning=FALSE}
+
+forecast_paypal = ugarchforecast(fit_paypal,n.ahead=1,data=paypal_close)
+forecast_mean_paypal = forecast_paypal@forecast$seriesFor
+forecast_vol_paypal = forecast_paypal@forecast$sigmaFor
+v = fit_paypal@fit$matcoef["shape",][1]
+VaR_paypal =  (forecast_mean_paypal  + forecast_vol_paypal*qt(0.05, v)/sqrt((v/(v-2))))*1000000 
+VaR_paypal
+
+
+forecast_magalu = ugarchforecast(fit_magalu,n.ahead=1,data=magalu_close)
+forecast_mean_magalu = forecast_magalu@forecast$seriesFor
+forecast_vol_magalu = forecast_magalu@forecast$sigmaFor
+v = fit_magalu@fit$matcoef["shape",][1]
+VaR_magalu =  (forecast_mean_magalu  + forecast_vol_magalu*qt(0.05, v)/sqrt((v/(v-2))))*1000000 
+VaR_magalu
+```
+
+A perda máxima da ação da Paypal no dia 2/10/2020 será de 43331.8 reais, enquanto a perda máxima da ação da Magazine Luiza será de 39640.51 reais.
+
+#### VaR da "Carteira"
+
+```{r, message=FALSE, warning=FALSE}
+# Correlação entre as ações
+VaR_carteira = sqrt(VaR_paypal^2 + VaR_magalu^2 + 2*cor(paypal_cor,magalu_cor)*abs(VaR_magalu)*abs(VaR_paypal))
+
+VaR_carteira
+```
+
+A perda máxima será de R$ 81784.4 no dia 02/10/2020.
+
+## Conclusões
+
+Primeiramente olhou-se se o preço dos ativos eram estacionários ou não, e verificou-se que não eram, pois haviam tendência de crescimento. Depois disso, analisou-se os retornos para verificar a necessidade de um ajuste ARMA. No caso da Paypal, o ARMA(3,4) era o mais adequado, enquanto no caso da Magazine Luiza, ajustou-se um ARMA(4,1). Os retornos ao quadrado, proxy para a volatilidade, não eram independentes, e por isso, viu-se que havia efeitos ARCH.
+
+Encontrou-se o modelo ARMA(3,2)+eGARCH(3,4) para Paypal, e o modelo ARMA(4,1)+GARCH(1,1) para Magazine Luiza. Nos dois casos, os modelos estavam bem ajustados e os resíduos eram um ruído branco.
+
+Por fim, no Value at Risk, utilizou-se duas abordagens, a RiskMetrics e a Econométrica. Na abordagem RiskMetrics, a perda máxima para o dia seguinte da série foi de 82684.65 reais. Já na abordagem Econométrica, a perda máxima encontrada foi de 81784.4 reais. Percebe-se que a abordagem econométrica é a mais adequada para esse caso, pois há a necessidade de um ajuste ARMA, o que não é possível de ser feito no RiskMetrics.
